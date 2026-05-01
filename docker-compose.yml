@@ -1,0 +1,22 @@
+
+
+services:
+  ledger-db:
+    image: postgres:15-alpine
+    container_name: ledger-db
+    restart: always
+    environment:
+      POSTGRES_USER: ledger_admin
+      POSTGRES_PASSWORD: super_secret_password_123
+      POSTGRES_DB: ledgercore
+    ports:
+      # SECURITY LEAD LENS: Bind strictly to localhost (127.0.0.1)
+      # Do NOT just use '5432:5432' which exposes it to the global internet (0.0.0.0)
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # SRE LENS: This maps container data to a safe folder on your Windows host.
+      # If the container is destroyed, your data survives here.
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
