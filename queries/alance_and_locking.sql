@@ -39,3 +39,14 @@ FOR UPDATE;
 -- 5. tx.Exec("INSERT INTO entries ... (Debit)")
 -- 6. tx.Exec("INSERT INTO entries ... (Credit)")
 -- 7. tx.Commit()
+DO $$
+DECLARE
+    user_a_id UUID := 'a1111111-1111-1111-1111-111111111111';
+    dummy_tx UUID;
+BEGIN
+    FOR i IN 1..100000 LOOP
+        dummy_tx := uuid_generate_v4();
+        INSERT INTO transactions (id, reference) VALUES (dummy_tx, 'DUMMY_' || i);
+        INSERT INTO entries (transaction_id, account_id, amount) VALUES (dummy_tx, user_a_id, 1.0000);
+    END LOOP;
+END $$;
