@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"ledgercore/internal/config"
+
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,8 +37,11 @@ type TransferRequest struct {
 
 func main() {
 	// 1. Initialize the Connection Pool
-	dbURL := "postgres://ledger_admin:super_secret_password_123@localhost:5432/ledgercore"
-	pool, err := pgxpool.New(context.Background(), dbURL)
+	// 1. Load Configuration
+	cfg := config.Load()
+
+	// 2. Initialize the Connection Pool using the injected URL
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: Unable to create connection pool: %v\n", err)
 		os.Exit(1)
@@ -183,9 +188,13 @@ func main() {
 	})
 
 	// 3. Start the Server
-	fmt.Println("LedgerCore API is listening on port 8080...")
-	// This function blocks forever, keeping the server alive.
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	fmt.Printf("LedgerCore API is listening on port %s...\n", cfg.Port)
+	if err := http.ListenAndServe(":"+cfg.Port, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "Server crashed: %v\n", err)
 	}
+	// fmt.Println("LedgerCore API is listening on port 8080...")
+	// // This function blocks forever, keeping the server alive.
+	// if err := http.ListenAndServe(":8080", nil); err != nil {
+	// 	fmt.Fprintf(os.Stderr, "Server crashed: %v\n", err)
+	// }
 }
