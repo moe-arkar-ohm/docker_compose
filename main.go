@@ -2,51 +2,62 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func main() {
-	// 1. The Connection String
-	dbURL := "postgres://ledger_admin:super_secret_password_123@localhost:5432/ledgercore"
+// We define a struct to represent the JSON response we will send back.
+type BalanceResponse struct {
+	AccountID string  `json:"account_id"`
+	Balance   float64 `json:"balance"`
+}
 
-	// 2. Create a Connection Pool (Instead of a single connection)
-	// pgxpool manages dozens of connections for high concurrency.
+func main() {
+	// 1. Initialize the Connection Pool
+	dbURL := "postgres://ledger_admin:super_secret_password_123@localhost:5432/ledgercore"
 	pool, err := pgxpool.New(context.Background(), dbURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: Unable to create connection pool: %v\n", err)
 		os.Exit(1)
 	}
-	// Defer the closing of the ENTIRE pool when the program shuts down
 	defer pool.Close()
-
 	fmt.Println("LedgerCore Pool initialized successfully.")
 
-	// 3. The Target Data
-	// This is User A's UUID that we seeded earlier.
-	userA_ID := "a1111111-1111-1111-1111-111111111111"
+	// 2. Define the Drive-Thru Window (The Endpoint)
+	http.HandleFunc("/balance", func(w http.ResponseWriter, r *http.Request) {
+		// For now, we hardcode the ID. Later, we will extract this from the URL.
+		accountID := "a1111111-1111-1111-1111-111111111111"
+		var currentBalance float64
 
-	// 4. The Raw SQL Query
-	sqlQuery := `
-		SELECT SUM(amount) 
-		FROM entries 
-		WHERE account_id = $1
-	`
+		// Execute the query
+		sqlQuery := `SELECT SUM(amount) FROM entries WHERE account_id = $1`
+		err := pool.QueryRow(r.Context(), sqlQuery, accountID).Scan(&currentBalance)
 
-	// 5. Execute the Query
-	var currentBalance float64 // Variable to store the result
+		if err != nil {
+			// If the query fails, return an HTTP 500 status code
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
 
-	// QueryRow asks for exactly ONE row of data.
-	// Scan takes the database output and injects it into our currentBalance variable.
-	err = pool.QueryRow(context.Background(), sqlQuery, userA_ID).Scan(&currentBalance)
+		// Prepare the JSON response
+		response := BalanceResponse{
+			AccountID: accountID,
+			Balance:   currentBalance,
+		}
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Query failed: %v\n", err)
-		return
+		// Set the header to tell the client we are sending JSON, then send it.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	// 3. Start the Server
+	fmt.Println("LedgerCore API is listening on port 8080...")
+	// This function blocks forever, keeping the server alive.
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		fmt.Fprintf(os.Stderr, "Server crashed: %v\n", err)
 	}
-
-	// 6. Output the result
-	fmt.Printf("User A's Current Balance: $%.4f\n", currentBalance)
 }
