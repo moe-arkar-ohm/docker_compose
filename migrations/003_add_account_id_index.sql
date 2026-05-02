@@ -1,0 +1,1 @@
+CREATE INDEX idx_entries_account_id ON entries USING btree (account_id);
