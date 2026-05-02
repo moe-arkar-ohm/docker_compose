@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ledgercore/internal/config"
+	"ledgercore/internal/repository"
 
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,6 +49,8 @@ func main() {
 	}
 	defer pool.Close()
 	fmt.Println("LedgerCore Pool initialized successfully.")
+	// 3. Initialize the Repository Layer
+	ledgerRepo := repository.NewLedgerRepo(pool)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		// 2. Upgrade the connection
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -82,12 +85,17 @@ func main() {
 		var currentBalance float64
 
 		// Execute the query
-		sqlQuery := `SELECT SUM(amount) FROM entries WHERE account_id = $1`
-		err := pool.QueryRow(r.Context(), sqlQuery, accountID).Scan(&currentBalance)
+		// sqlQuery := `SELECT SUM(amount) FROM entries WHERE account_id = $1`
+		// err := pool.QueryRow(r.Context(), sqlQuery, accountID).Scan(&currentBalance)
 
+		// if err != nil {
+		// 	// If the query fails, return an HTTP 500 status code
+		// 	http.Error(w, "Database error", http.StatusInternalServerError)
+		// 	return
+		// }
+		// The Waiter (Handler) asks the Farmer (Repository) for the data.
+		currentBalance, err := ledgerRepo.GetBalance(r.Context(), accountID)
 		if err != nil {
-			// If the query fails, return an HTTP 500 status code
-			fmt.Printf("DEBUG: JSON Decode Error: %v\n", err)
 			http.Error(w, "Database error", http.StatusInternalServerError)
 			return
 		}
