@@ -4,29 +4,49 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
-	// The Architect: We connect via localhost because Go is running on your Windows host right now,
-	// communicating through the port (5432) we explicitly exposed in docker-compose.yml.
+	// 1. The Connection String
 	dbURL := "postgres://ledger_admin:super_secret_password_123@localhost:5432/ledgercore"
 
-	// The SRE: Never let a database dictate how long your API waits.
-	// We enforce a strict 3-second timeout for the connection attempt.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	// Attempt the connection
-	conn, err := pgx.Connect(ctx, dbURL)
+	// 2. Create a Connection Pool (Instead of a single connection)
+	// pgxpool manages dozens of connections for high concurrency.
+	pool, err := pgxpool.New(context.Background(), dbURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "FATAL: Unable to connect to database: %v\n", err)
+		fmt.Fprintf(os.Stderr, "FATAL: Unable to create connection pool: %v\n", err)
 		os.Exit(1)
 	}
-	// Ensure the connection is cleanly closed when the program exits
-	defer conn.Close(context.Background())
+	// Defer the closing of the ENTIRE pool when the program shuts down
+	defer pool.Close()
 
-	fmt.Println("LedgerCore Go Engine connected to PostgreSQL successfully! The engine is alive.")
+	fmt.Println("LedgerCore Pool initialized successfully.")
+
+	// 3. The Target Data
+	// This is User A's UUID that we seeded earlier.
+	userA_ID := "a1111111-1111-1111-1111-111111111111"
+
+	// 4. The Raw SQL Query
+	sqlQuery := `
+		SELECT SUM(amount) 
+		FROM entries 
+		WHERE account_id = $1
+	`
+
+	// 5. Execute the Query
+	var currentBalance float64 // Variable to store the result
+
+	// QueryRow asks for exactly ONE row of data.
+	// Scan takes the database output and injects it into our currentBalance variable.
+	err = pool.QueryRow(context.Background(), sqlQuery, userA_ID).Scan(&currentBalance)
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Query failed: %v\n", err)
+		return
+	}
+
+	// 6. Output the result
+	fmt.Printf("User A's Current Balance: $%.4f\n", currentBalance)
 }
