@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"time"
 
 	"ledgercore/internal/config"
+	"ledgercore/internal/handlers"
 	"ledgercore/internal/repository"
 
 	"github.com/gorilla/websocket"
@@ -29,13 +29,6 @@ type BalanceResponse struct {
 	Balance   float64 `json:"balance"`
 }
 
-// 1. Define the input structure matching the JSON payload
-type TransferRequest struct {
-	SenderID   string  `json:"sender_id"`
-	ReceiverID string  `json:"receiver_id"`
-	Amount     float64 `json:"amount"`
-}
-
 func main() {
 	// 1. Initialize the Connection Pool
 	// 1. Load Configuration
@@ -51,6 +44,16 @@ func main() {
 	fmt.Println("LedgerCore Pool initialized successfully.")
 	// 3. Initialize the Repository Layer
 	ledgerRepo := repository.NewLedgerRepo(pool)
+	// 3. Initialize the Repository Layer (The Concrete Postgres Farmer)
+
+	// 4. Initialize the Handler Layer (The Waiter)
+	// Because `ledgerRepo` has the exact functions required by the `LedgerService` interface,
+	// Go automatically allows it to be plugged in here!
+	ledgerHandler := handlers.NewLedgerHandler(ledgerRepo)
+
+	// 5. Define the Routes
+	http.HandleFunc("/transfer", ledgerHandler.HandleTransfer)
+	// ... (Keep your old /balance and /ws routes here for now)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		// 2. Upgrade the connection
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -111,114 +114,6 @@ func main() {
 		json.NewEncoder(w).Encode(response)
 	})
 	// Inside your main() function, add this new endpoint:
-	http.HandleFunc("/transfer", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		var req TransferRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			fmt.Printf("DEBUG: JSON Decode Error: %v\n", err)
-			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
-			return
-		}
-
-		// =====================================================================
-		// THE TIMEOUT SAFETY NET
-		// We wrap the HTTP request context with a strict 5-second limit.
-		// Every database call below will use 'ctx' instead of 'r.Context()'.
-		// =====================================================================
-		// ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		// defer cancel()
-
-		// tx, err := pool.Begin(ctx)
-		// if err != nil {
-		// 	fmt.Printf("DEBUG: Failed to begin tx: %v\n", err)
-		// 	http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
-		// 	return
-		// }
-		// defer tx.Rollback(ctx)
-
-		// // 1. PESSIMISTIC LOCK: Lock the Sender's Account Row
-		// // This freezes any other API requests trying to touch User A's money.
-		// _, err = tx.Exec(ctx, "SELECT id FROM accounts WHERE id = $1 FOR UPDATE", req.SenderID)
-		// if err != nil {
-		// 	fmt.Printf("DEBUG: Failed to lock account: %v\n", err)
-		// 	http.Error(w, "Database locked, try again", http.StatusGatewayTimeout) // 504 Error!
-		// 	return
-		// }
-
-		// // 2. CALCULATE BALANCE: COALESCE turns a NULL (no entries yet) into a 0.
-		// var currentBalance float64
-		// err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(amount), 0) FROM entries WHERE account_id = $1", req.SenderID).Scan(&currentBalance)
-		// if err != nil {
-		// 	fmt.Printf("DEBUG: Failed to calculate balance: %v\n", err)
-		// 	http.Error(w, "Failed to verify funds", http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// // 3. THE BUSINESS LOGIC: Prevent the Infinite Money Glitch
-		// if currentBalance < req.Amount {
-		// 	// Do not process the transfer. The defer tx.Rollback() will clean up.
-		// 	http.Error(w, "Insufficient funds", http.StatusBadRequest)
-		// 	return
-		// }
-
-		// // 4. EXECUTE TRANSFER (Now that we know it is mathematically safe)
-		// txRef := fmt.Sprintf("API_TX_%d", time.Now().UnixNano())
-
-		// _, err = tx.Exec(ctx, "INSERT INTO transactions (reference) VALUES ($1)", txRef)
-		// if err != nil {
-		// 	http.Error(w, "Failed to write transaction", http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// _, err = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, amount) VALUES ((SELECT id FROM transactions WHERE reference = $1), $2, $3)", txRef, req.SenderID, -req.Amount)
-		// if err != nil {
-		// 	http.Error(w, "Failed to write debit", http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// _, err = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, amount) VALUES ((SELECT id FROM transactions WHERE reference = $1), $2, $3)", txRef, req.ReceiverID, req.Amount)
-		// if err != nil {
-		// 	http.Error(w, "Failed to write credit", http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// if err := tx.Commit(ctx); err != nil {
-		// 	http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// w.WriteHeader(http.StatusCreated)
-		// w.Write([]byte("Transfer completed securely.\n"))
-		// =====================================================================
-		// CLEAN ARCHITECTURE: The Handler ONLY deals with HTTP and parsing JSON.
-		// It delegates all database work to the Repository.
-		// =====================================================================
-
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		// The Waiter asks the Farmer to do the heavy lifting
-		err := ledgerRepo.ExecuteTransfer(ctx, req.SenderID, req.ReceiverID, req.Amount)
-
-		if err != nil {
-			// If the error was specifically "insufficient funds", return a 400 Bad Request
-			if err.Error() == "insufficient funds" {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			// Otherwise, it was a systemic database failure. Return a 500.
-			fmt.Printf("DEBUG: Transfer failed: %v\n", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("Transfer completed securely.\n"))
-	})
 
 	// 3. Start the Server
 	fmt.Printf("LedgerCore API is listening on port %s...\n", cfg.Port)
