@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"ledgercore/internal/errors"
 
 	"fmt"
 	"time"
@@ -57,7 +58,8 @@ func (r *LedgerRepo) ExecuteTransfer(ctx context.Context, senderID, receiverID s
 
 	// 3. BUSINESS LOGIC: Prevent the Infinite Money Glitch
 	if currentBalance < amount {
-		return fmt.Errorf("insufficient funds") // We return an error, stopping the execution
+		// return fmt.Errorf("insufficient funds") // We return an error, stopping the execution
+		return errors.ErrInsufficientFunds // We return an error, stopping the execution
 	}
 
 	// 4. EXECUTE TRANSFER

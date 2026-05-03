@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	customerrors "ledgercore/internal/errors"
 	"net/http"
 	"time"
 )
@@ -50,10 +52,19 @@ func (h *LedgerHandler) HandleTransfer(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 4. THE MAGIC: We call ExecuteTransfer on the INTERFACE, not the Postgres repo directly.
+	// err := h.service.ExecuteTransfer(ctx, req.SenderID, req.ReceiverID, req.Amount)
+	// if err != nil {
+	// 	if err.Error() == "insufficient funds" {
+	// 		http.Error(w, err.Error(), http.StatusBadRequest)
+	// 		return
+	// 	}
+	// Add the standard "errors" package and your custom "ledgercore/internal/errors" package to imports.
+
 	err := h.service.ExecuteTransfer(ctx, req.SenderID, req.ReceiverID, req.Amount)
 	if err != nil {
-		if err.Error() == "insufficient funds" {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		// Use errors.Is to mathematically check the Sentinel identity
+		if errors.Is(err, customerrors.ErrInsufficientFunds) {
+			http.Error(w, "Insufficient funds in wallet", http.StatusBadRequest)
 			return
 		}
 		fmt.Printf("DEBUG: Transfer failed: %v\n", err)
