@@ -11,6 +11,8 @@ import (
 type AppConfig struct {
 	DatabaseURL string
 	Port        string
+	JWTSecret   string // NEW
+
 }
 
 // Load reads the .env file and extracts the variables.
@@ -32,7 +34,10 @@ func Load() *AppConfig {
 		// If no port is specified, we safely default to 8080.
 		port = "8080"
 	}
-
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("FATAL: JWT_SECRET environment variable is required")
+	}
 	return &AppConfig{
 		DatabaseURL: dbURL,
 		Port:        port,
